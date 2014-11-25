@@ -47,7 +47,6 @@ typedef uint64_t map_t;
 struct rvm {
 	char		* directory;			//backing store directory
 	char		* log_file;				//log file
-	char		* trans_id;				//file storing global transaction id
 	int			seg_num;				//the number of mapped segments
 	map_t		segs_map[MAX_SEGS];		//define a mapping between mapped segments and its virtual address
 };

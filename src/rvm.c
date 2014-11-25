@@ -41,7 +41,6 @@ rvm_t rvm_init(const char * directory)
 	memset(rvmP, 0, sizeof(struct rvm));
 	rvmP->directory = strdup(directory);
 	rvmP->log_file = strdup(log_file_name);
-	rvmP->trans_id = strdup(trans_id_file);
 	rvmP->seg_num = 0;
 
 	return (rvm_t)rvmP;
@@ -112,9 +111,7 @@ void * rvm_map(rvm_t rvm, const char * segname, int size)
 	}
 	if (stat(path, &st) == 0) {
 		if ( !S_ISREG(st.st_mode) ) {
-			fprintf(stderr, "file(%s) for segment backing store has already \
-					existed, but it is not a regular file please choose \
-					another name\n", path);
+			fprintf(stderr, "file(%s) for segment backing store has already existed, but it is not a regular file please choose another name\n", path);
 			return NULL;
 		}
 	} else if (errno == ENOENT) {
@@ -190,7 +187,7 @@ void rvm_unmap(rvm_t rvm, void *segbase)
 	int inx = get_segid(rvmP->segs_map, rvmP->seg_num, segbase);
 
 	if (inx < 0) {
-		fprintf(stderr, "did not find segmant with address:%lu\n", segbase);
+		fprintf(stderr, "did not find segmant with address:%lu\n", (uint64_t)segbase);
 		return;
 	}
 
@@ -220,7 +217,7 @@ void rvm_unmap(rvm_t rvm, void *segbase)
 }
 
 
-trans_t rvm_begin_tran(rvm_t rvm, int numsegs, void **segbase)
+trans_t rvm_begin_trans(rvm_t rvm, int numsegs, void **segbase)
 {
 	/* set related segment as active */
 	struct rvm * rvmP = (struct rvm *) rvm;
@@ -242,7 +239,7 @@ trans_t rvm_begin_tran(rvm_t rvm, int numsegs, void **segbase)
 	for (i = 0; i < numsegs; i++) {
 		inx = get_segid(rvmP->segs_map, rvmP->seg_num, segbase[i]);
 		if (inx < 0)
-			fprintf(stderr, "did not find segment for address (%lu)\n", segbase[i]);
+			fprintf(stderr, "did not find segment for address (%lu)\n", (uint64_t)segbase[i]);
 		trans_map[transP->seg_num] = rvm_map[inx];
 		transP->seg_num++;
 	}
@@ -271,22 +268,156 @@ void rvm_about_to_modify(trans_t id, void * segbase, int offset, int size)
 	segP->updates++;
 }
 
+void rvm_truncate_log(rvm_t rvm)
+{
+	struct rvm *rvmP = (struct rvm *)rvm;
+	char * rvm_dir = strdup(rvmP->directory);
+	char log_file[256], seg[256], seg_name[32];
 
-#if 0
+	int len = strlen(rvmP->directory); 
+	int rdsize, seg_fd;
+	FILE *log_fp;
+	uint64_t offset, size;
+	char *buf;
+
+	if (rvmP->directory[len-1] == '/') {
+			sprintf(log_file, "%s%s", rvmP->directory, rvmP->log_file);
+	} else { 
+		sprintf(log_file, "%s/%s", rvmP->directory, rvmP->log_file);
+	}
+	
+	log_fp = fopen(log_file, "rw");
+	if (log_fp == NULL) {
+		fprintf(stderr, "open log file (%s) error: %s, %d\n", log_file, __func__, __LINE__);
+		return;
+	}
+
+	while(1) {
+		/* get log name, update offset and update size */
+		rdsize = fscanf(log_fp, "%s %lu %lu\n", seg_name, &offset, &size);
+		
+		if (rdsize == 0) break;
+		
+		if (rvmP->directory[len-1] == '/') {
+			sprintf(seg, "%s%s", rvmP->directory, seg_name);
+		} else { 
+			sprintf(seg, "%s/%s", rvmP->directory, seg_name);
+		}
+
+		buf = (char *) malloc (size);
+		seg_fd = open(seg, O_RDWR);
+		lseek(seg_fd, offset, SEEK_SET);
+
+		rdsize = fread(buf, size, 1, log_fp);
+		
+		if (rdsize == 0) break;
+#if 0	
+		if (rdsize != size) {
+			fprintf(stderr, "log error, the data size for segment (%s) is not equal expected size\n", seg);
+			continue;
+		}
+#endif
+		rdsize = write(seg_fd, buf, size);
+		syncfs(seg_fd);
+		close(seg_fd);
+
+		free(buf);
+	}
+	fclose(log_fp);
+
+	truncate(log_file, 0);
+}
+
 void rvm_commit_trans(trans_t tid)
-{}
+{
+	struct trans *transP = (struct trans *) tid;
+	struct rvm *rvmP = (struct rvm *)(transP->rvm);
+	char log_file[256], seg[256];
+
+	int i, j, trans_num, len, fd;
+	struct mapping *mapP;
+	struct seg *segP;
+	struct update *updateP;
+	FILE *log_fp;
+	map_t * map = transP->segs_map;
+
+	trans_num = transP->seg_num;
+	len = strlen(rvmP->directory); 
+	
+	if (rvmP->directory[len-1] == '/') {
+		sprintf(log_file, "%s%s", rvmP->directory, rvmP->log_file);
+	} else { 
+		sprintf(log_file, "%s/%s", rvmP->directory, rvmP->log_file);
+	}
+
+	log_fp = fopen(log_file, "a");
+
+	for (i = 0; i < trans_num; i++) {
+		mapP = (struct mapping *)map[i];
+		segP = (struct seg *)mapP->segid;
+
+		for (j = 0; j < segP->updates; j++) {
+			updateP = (struct update *)segP->old[j];
+			fprintf(log_fp, "%s %lu %lu\n", segP->seg_name, updateP->offset, updateP->size);
+
+			fwrite((void *)mapP->segbase + updateP->offset, updateP->size, 1, log_fp);
+			fprintf(log_fp, "\n");
+			fflush(log_fp);
+		}
+
+		segP->commited = 1;
+#if 0
+		/* writing data to segments */
+		if (rvmP->directory[len-1] == '/') {
+			sprintf(seg, "%s%s", rvmP->directory, segP->seg_name);
+		} else { 
+			sprintf(seg, "%s/%s", rvmP->directory, segP->seg_name);
+		}
+
+		size = segP->seg_size;
+
+		fd = open(seg, O_RDWR);
+		write(fd, (void *) mapP->segbase, (size_t)size);
+		close(fd);
+#endif
+	}
+
+	fclose(log_fp);
+	rvm_truncate_log(transP->rvm);
+}
 
 
 void rvm_abort_trans(trans_t tid)
-{}
+{
+	struct trans *transP = (struct trans *) tid;
+	struct rvm *rvmP = (struct rvm *)(transP->rvm);
+
+	int i, j, trans_num, len;
+	struct mapping *mapP;
+	struct seg *segP;
+	struct update *updateP;
+	map_t * map = transP->segs_map;
+
+	trans_num = transP->seg_num;
+	
+	for (i = 0; i < trans_num; i++) {
+		mapP = (struct mapping *)map[i];
+		segP = (struct seg *)mapP->segid;
+
+		for (j = 0; j < segP->updates; j++) {
+			updateP = (struct update *)segP->old[j];
+			memcpy(mapP->segbase+updateP->offset, updateP->buf, updateP->size);
+			free(updateP);
+			segP->old[j] = 0;
+		}
+		segP->commited = 0;
+		segP->modified = 0;
+	}	
+}
 
 
-void rvm_truncate_log(rvm_t rvm)
-{}
 
 
 void rvm_verbose(int enable_flag)
 {}
 
-
-#endif 

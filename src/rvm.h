@@ -34,14 +34,13 @@ extern void rvm_destroy(rvm_t rvm, const char *segname);
  */
 extern void *rvm_map (rvm_t rvm, const char *segname, int size);
 
-#if 0
 /* unmap a segment from memory, segbase is the returned address */
 extern void rvm_unmap(rvm_t rvm, void *segbase);
 
 /* begin a transaction that will modify the 
  * segments listed in segbases 
  */
-extern trans_t rvm_begin_tran(rvm_t rvm, int numsegs, void **segbases);
+extern trans_t rvm_begin_trans(rvm_t rvm, int numsegs, void **segbases);
 
 extern void rvm_about_to_modify(trans_t id, void * segbase, int offset, int size);
 
@@ -54,7 +53,6 @@ extern void rvm_abort_trans(trans_t tid);
 extern void rvm_truncate_log(rvm_t rvm);
 
 /* if enabled, print infomation about what is doing */
-extern void rvm_verbose(int enable_flag)
+extern void rvm_verbose(int enable_flag);
 
-#endif
 #endif
