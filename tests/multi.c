@@ -74,6 +74,7 @@ void proc2()
 
 int main(int argc, char **argv) 
 {
+#if 1
      int pid;
 
      pid = fork();
@@ -89,7 +90,10 @@ int main(int argc, char **argv)
      waitpid(pid, NULL, 0);
 
      proc2();
-
+#else
+	 proc1();
+	 proc2();
+#endif
      return 0;
 }
 

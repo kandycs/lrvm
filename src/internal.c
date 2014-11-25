@@ -47,16 +47,15 @@ int status(rvm_t rvm, const char *segname)
 
 int seg_free(map_t maps[], int size, const char *segname)
 {
-	int i = 0;
+	int i = 0, count = 0;
 
 	struct mapping * mapP;
 	struct seg * segP;
 
-	while (i < size) {
+	for (i = 0; count < size; i++) {
 		mapP = (struct mapping *) maps[i];
-		if (maps[i] == 0) {
+		if (maps[i] == 0)
 			continue;
-		}
 
 		segP = (struct seg *)(mapP->segid);
 		if ( 0 == strcmp(segP->seg_name, segname)) {
@@ -66,7 +65,8 @@ int seg_free(map_t maps[], int size, const char *segname)
 			return 1;
 		}
 
-		i++;
+		count++;
+
 	}
 
 	return 0;
@@ -92,17 +92,18 @@ int get_segid(map_t map[], int seg_num, const void *segbase)
 {
 	uint64_t base_addr = (uint64_t) segbase;
 	struct mapping *mapP;
+	int count = 0;
 	int i = 0;
 
-	while( i < seg_num ) {
+	for (i = 0; count < seg_num; i++) {
 		mapP = (struct mapping *)map[i];
-		if (map[i] == 0)
+		if (map[i] == 0) 
 			continue;
 		if (mapP->segbase == 0 || mapP->segid == 0)
 			continue;
 		if (mapP->segbase == base_addr)
 			return i;
-		i++;
+		count++;
 	} 
 	return -1;
 }
