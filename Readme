@@ -1,4 +1,6 @@
 The code implemented a toy of lightweight recoverable virtual memory.
+To make the test work correctly, I changed the code by calling rvm_unmap explicity
+for each mapped segment.
 
 1. build the lrvm library:
    $make

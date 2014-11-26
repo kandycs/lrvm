@@ -55,4 +55,5 @@ extern void rvm_truncate_log(rvm_t rvm);
 /* if enabled, print infomation about what is doing */
 extern void rvm_verbose(int enable_flag);
 
+extern void simcrash(int flag);
 #endif

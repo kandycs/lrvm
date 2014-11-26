@@ -12,7 +12,14 @@
 #include "rvm_type.h"
 #include "internal.h"
 
+static int verbose = 0;
+static int crash = 0;    //simulating crash
 void rvm_truncate_log(rvm_t rvm);
+
+void simcrash(int flag)
+{
+	crash = flag;
+}
 
 rvm_t rvm_init(const char * directory)
 {
@@ -20,6 +27,9 @@ rvm_t rvm_init(const char * directory)
 	char log_file[128]={0}; 
 	struct rvm *rvmP;
 	struct stat st={0};
+
+	if (verbose)
+		fprintf(stdout, "rvm_init: begin to initialize rvm\n");
 
 	assert(directory != NULL);
 
@@ -32,6 +42,8 @@ rvm_t rvm_init(const char * directory)
 			exit(-1);
 		}
 	} else if (errno == ENOENT) {		//dir not exiting, create one
+		if (verbose)
+			fprintf(stdout, "rvm_init: create rvm directory\n");
 		mkdir(directory, 0700);
 		sprintf(log_file, "%s/%s.log", directory, directory);
 		creat(log_file, S_IRWXU);
@@ -42,6 +54,8 @@ rvm_t rvm_init(const char * directory)
 
 	sprintf(log_file_name, "%s.log", directory);
 
+	if (verbose)
+		fprintf(stdout, "rvm_init: creating rvm data structure\n");
 	rvmP = (struct rvm *) malloc (sizeof(struct rvm));
 	memset(rvmP, 0, sizeof(struct rvm));
 	rvmP->directory = strdup(directory);
@@ -66,6 +80,8 @@ void rvm_destroy(rvm_t rvm, const char *segname)
 	struct rvm *rvmP = (struct rvm *)rvm;
 	int len = strlen(rvmP->directory);
 	struct stat st={0};
+	if (verbose)
+		fprintf(stdout, "rvm_destroy: begin to destroy segment:%s\n", segname);
 
 	if (rvmP->directory[len-1] == '/') {
 		sprintf(path, "%s%s", rvmP->directory, segname);
@@ -108,6 +124,9 @@ void * rvm_map(rvm_t rvm, const char * segname, int size)
 	struct mapping *mapP;
 
 	int index;
+	
+	if (verbose)
+		fprintf(stdout, "rvm_map: begin to map segment:%s\n", segname);
 
 	if (rvmP->directory[len-1] == '/') {
 		sprintf(path, "%s%s", rvmP->directory, segname);
@@ -122,6 +141,8 @@ void * rvm_map(rvm_t rvm, const char * segname, int size)
 			return NULL;
 		}
 	} else if (errno == ENOENT) {
+		if (verbose)
+			fprintf(stdout, "rvm_map: creating segment:%s\n", segname);
 		creat(path, S_IRWXU);
 		creat(segstatus, S_IRWXU);
 		set(segstatus, UNMAPPED);
@@ -130,6 +151,8 @@ void * rvm_map(rvm_t rvm, const char * segname, int size)
 		return NULL;
 	}
 
+	if (verbose)
+		fprintf(stdout, "rvm_map: checking segment:%s status\n", segname);
 	/* check whether segment has been mapped */
 	if (status(rvm, segname) == MAPPED) {
 		fprintf(stderr, "segment %s (file: %s) has been mapped\n", segname, path);
@@ -151,6 +174,9 @@ void * rvm_map(rvm_t rvm, const char * segname, int size)
 	/* move back to the beginning of original file */
 	lseek(fd, 0, SEEK_SET);
 
+	if (verbose)
+		fprintf(stdout, "rvm_map: mapping segment:%s to virtual address\n", segname);
+	
 	ptr = (void *)malloc(size);
 	if (ptr == NULL) {
 		fprintf(stderr, "memory application error\n");
@@ -184,14 +210,19 @@ void * rvm_map(rvm_t rvm, const char * segname, int size)
 
 void rvm_unmap(rvm_t rvm, void *segbase)
 {
+	int len, inx;
 	struct seg *segP;
 	seg_t segid;
 	char segstatus[256];
 	struct mapping *mapP;
 	struct rvm *rvmP = (struct rvm *) rvm;
 	map_t *map = rvmP->segs_map;
-	int len = strlen(rvmP->directory);
-	int inx = get_segid(rvmP->segs_map, rvmP->seg_num, segbase);
+	
+	if(segbase == NULL) return;
+
+	len = strlen(rvmP->directory);
+	inx = get_segid(rvmP->segs_map, rvmP->seg_num, segbase);
+	
 
 	if (inx < 0) {
 		fprintf(stderr, "did not find segmant with address:%lu\n", (uint64_t)segbase);
@@ -208,6 +239,8 @@ void rvm_unmap(rvm_t rvm, void *segbase)
 				but not committed\n", segP->seg_name);
 		return;
 	}
+	if (verbose)
+		fprintf(stdout, "rvm_unmap: unmapping segment:%s\n", segP->seg_name);
 
 	if (rvmP->directory[len-1] == '/') {
 		sprintf(segstatus, "%s%s.status", rvmP->directory, segP->seg_name);
@@ -236,6 +269,9 @@ trans_t rvm_begin_trans(rvm_t rvm, int numsegs, void **segbase)
 		fprintf(stderr, "(%s:%d) allocating memory for transaction failed\n", __FILE__, __LINE__);
 		return 0;
 	}
+	
+	if (verbose)
+		fprintf(stdout, "rvm_begin_trans: creating a transaction\n");
 
 	transP->rvm		= rvm;
 	transP->seg_num = 0;
@@ -244,6 +280,7 @@ trans_t rvm_begin_trans(rvm_t rvm, int numsegs, void **segbase)
 	trans_map = transP->segs_map;
 
 	for (i = 0; i < numsegs; i++) {
+		if (segbase[i] == NULL) continue;
 		inx = get_segid(rvmP->segs_map, rvmP->seg_num, segbase[i]);
 		if (inx < 0)
 			fprintf(stderr, "did not find segment for address (%lu)\n", (uint64_t)segbase[i]);
@@ -262,6 +299,9 @@ void rvm_about_to_modify(trans_t id, void * segbase, int offset, int size)
 	struct seg *segP;
 	struct mapping *mapP;
 	int inx;
+	
+	if (verbose)
+		fprintf(stdout, "rvm_about_to_modify: backing up old values\n");
 
 	updateP->offset = offset;
 	updateP->size  = size;
@@ -279,8 +319,8 @@ void rvm_truncate_log(rvm_t rvm)
 {
 	struct rvm *rvmP = (struct rvm *)rvm;
 	char * rvm_dir = strdup(rvmP->directory);
-	char log_file[256], seg[256], seg_status[256], seg_name[32];
-
+	char log_file[256], seg[256], seg_name[32];
+//	char seg_status[256];
 	long pos;
 	int len = strlen(rvmP->directory); 
 	int rdsize, seg_fd, tmp, skip;
@@ -291,13 +331,15 @@ void rvm_truncate_log(rvm_t rvm)
 	struct stat st={0};
 
 	if (rvmP->directory[len-1] == '/') {
-			sprintf(log_file, "%s%s", rvmP->directory, rvmP->log_file);
+		sprintf(log_file, "%s%s", rvmP->directory, rvmP->log_file);
 	} else { 
 		sprintf(log_file, "%s/%s", rvmP->directory, rvmP->log_file);
 	}
 	
 	tmp = stat(log_file, &st);
 	if (tmp != 0 || st.st_size == 0) return;
+	if (verbose)
+		fprintf(stdout, "rvm_truncate_log: replay the log\n");
 	
 	log_fp = fopen(log_file, "rw");
 	if (log_fp == NULL) {
@@ -329,13 +371,13 @@ void rvm_truncate_log(rvm_t rvm)
 		
 		if (rvmP->directory[len-1] == '/') {
 			sprintf(seg, "%s%s", rvmP->directory, seg_name);
-			sprintf(seg_status, "%s%s.status", rvmP->directory, seg_name);
+//			sprintf(seg_status, "%s%s.status", rvmP->directory, seg_name);
 		} else { 
 			sprintf(seg, "%s/%s", rvmP->directory, seg_name);
-			sprintf(seg_status, "%s/%s.status", rvmP->directory, seg_name);
+//			sprintf(seg_status, "%s/%s.status", rvmP->directory, seg_name);
 		}
 		
-		set(seg_status, UNMAPPED);
+//		set(seg_status, UNMAPPED);
 
 		buf = (char *) malloc (size);
 		seg_fd = open(seg, O_RDWR|O_CREAT);
@@ -378,6 +420,8 @@ void rvm_commit_trans(trans_t tid)
 	} else { 
 		sprintf(log_file, "%s/%s", rvmP->directory, rvmP->log_file);
 	}
+	if(verbose)
+		fprintf(stdout, "rvm_commit_trans: commit updates\n");
 
 	log_fp = fopen(log_file, "r+");
 	fseek(log_fp, 0, SEEK_END);
@@ -419,7 +463,9 @@ void rvm_commit_trans(trans_t tid)
 	i = ftell(log_fp);
 	fprintf(log_fp, "tfs\n");
 	fclose(log_fp);
-	rvm_truncate_log(transP->rvm);
+	
+	if (!crash)
+		rvm_truncate_log(transP->rvm);
 }
 
 
@@ -435,6 +481,8 @@ void rvm_abort_trans(trans_t tid)
 	map_t * map = transP->segs_map;
 
 	trans_num = transP->seg_num;
+	if (verbose)
+		fprintf(stdout, "rvm_abort_trans: aborting updates, restoring old values\n");
 	
 	for (i = 0; i < trans_num; i++) {
 		mapP = (struct mapping *)map[i];
@@ -455,5 +503,7 @@ void rvm_abort_trans(trans_t tid)
 
 
 void rvm_verbose(int enable_flag)
-{}
+{	
+	verbose = 1;
+}
 

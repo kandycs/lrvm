@@ -19,6 +19,9 @@ test:
 	$(CC) $(CFLAGS) tests/multi-abort.c -L./lib -llrvm -o bin/multi-abort
 	$(CC) $(CFLAGS) tests/multi.c 		-L./lib -llrvm -o bin/multi
 	$(CC) $(CFLAGS) tests/truncate.c 	-L./lib -llrvm -o bin/truncate
+	$(CC) $(CFLAGS) tests/remap.c 		-L./lib -llrvm -o bin/remap
+	$(CC) $(CFLAGS) tests/multi-trans.c -L./lib -llrvm -o bin/multi-trans
+	$(CC) $(CFLAGS) tests/crash.c 		-L./lib -llrvm -o bin/crash
 
 
 clean :
