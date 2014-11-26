@@ -12,6 +12,8 @@
 #include "rvm_type.h"
 #include "internal.h"
 
+void rvm_truncate_log(rvm_t rvm);
+
 rvm_t rvm_init(const char * directory)
 {
 	char log_file_name[128]={0};
@@ -42,6 +44,8 @@ rvm_t rvm_init(const char * directory)
 	rvmP->directory = strdup(directory);
 	rvmP->log_file = strdup(log_file_name);
 	rvmP->seg_num = 0;
+
+	rvm_truncate_log((rvm_t)rvmP);
 
 	return (rvm_t)rvmP;
 }
@@ -179,7 +183,7 @@ void rvm_unmap(rvm_t rvm, void *segbase)
 {
 	struct seg *segP;
 	seg_t segid;
-	char segstatus[512];
+	char segstatus[256];
 	struct mapping *mapP;
 	struct rvm *rvmP = (struct rvm *) rvm;
 	map_t *map = rvmP->segs_map;
@@ -272,19 +276,24 @@ void rvm_truncate_log(rvm_t rvm)
 {
 	struct rvm *rvmP = (struct rvm *)rvm;
 	char * rvm_dir = strdup(rvmP->directory);
-	char log_file[256], seg[256], seg_name[32];
+	char log_file[256], seg[256], seg_status[256], seg_name[32];
 
 	int len = strlen(rvmP->directory); 
-	int rdsize, seg_fd;
+	int rdsize, seg_fd, tmp;
 	FILE *log_fp;
 	uint64_t offset, size;
 	char *buf;
+	
+	struct stat st={0};
 
 	if (rvmP->directory[len-1] == '/') {
 			sprintf(log_file, "%s%s", rvmP->directory, rvmP->log_file);
 	} else { 
 		sprintf(log_file, "%s/%s", rvmP->directory, rvmP->log_file);
 	}
+	
+	tmp = stat(log_file, &st);
+	if (tmp != 0 || st.st_size == 0) return;
 	
 	log_fp = fopen(log_file, "rw");
 	if (log_fp == NULL) {
@@ -300,23 +309,22 @@ void rvm_truncate_log(rvm_t rvm)
 		
 		if (rvmP->directory[len-1] == '/') {
 			sprintf(seg, "%s%s", rvmP->directory, seg_name);
+			sprintf(seg_status, "%s%s.status", rvmP->directory, seg_name);
 		} else { 
 			sprintf(seg, "%s/%s", rvmP->directory, seg_name);
+			sprintf(seg_status, "%s/%s.status", rvmP->directory, seg_name);
 		}
+		
+		set(seg_status, UNMAPPED);
 
 		buf = (char *) malloc (size);
-		seg_fd = open(seg, O_RDWR);
+		seg_fd = open(seg, O_RDWR|O_CREAT);
 		lseek(seg_fd, offset, SEEK_SET);
 
 		rdsize = fread(buf, size, 1, log_fp);
 		
 		if (rdsize == 0) break;
-#if 0	
-		if (rdsize != size) {
-			fprintf(stderr, "log error, the data size for segment (%s) is not equal expected size\n", seg);
-			continue;
-		}
-#endif
+		
 		rdsize = write(seg_fd, buf, size);
 		syncfs(seg_fd);
 		close(seg_fd);

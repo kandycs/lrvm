@@ -1,0 +1,21 @@
+The code implemented a toy of lightweight recoverable virtual memory.
+
+1. build the lrvm library:
+   $make
+   the liblrvm.a library will be generated under lib directory 
+
+2. compile the test program
+	$make test
+
+	the testing program will be generated under bin directory
+
+3. run the test program
+	cd bin
+	./abort (or other program)
+
+4. for truncate:
+   as the implementation automatically trunclates the log with 
+   an successful commitment, we generated a log in tests for demo.
+   firsty copy the log file to rvm directory, e.g rvm_segments 
+   (clear all files inside it to minmal the stat of crash firstly),
+   and then run the truncate program.
