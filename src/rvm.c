@@ -17,7 +17,7 @@ void rvm_truncate_log(rvm_t rvm);
 rvm_t rvm_init(const char * directory)
 {
 	char log_file_name[128]={0};
-	char trans_id_file[128]={0}; 
+	char log_file[128]={0}; 
 	struct rvm *rvmP;
 	struct stat st={0};
 
@@ -33,12 +33,15 @@ rvm_t rvm_init(const char * directory)
 		}
 	} else if (errno == ENOENT) {		//dir not exiting, create one
 		mkdir(directory, 0700);
+		sprintf(log_file, "%s/%s.log", directory, directory);
+		creat(log_file, S_IRWXU);
 	} else {	
 		perror("error for checking backing store directory");
 		exit(-1);
 	}
 
 	sprintf(log_file_name, "%s.log", directory);
+
 	rvmP = (struct rvm *) malloc (sizeof(struct rvm));
 	memset(rvmP, 0, sizeof(struct rvm));
 	rvmP->directory = strdup(directory);
@@ -278,11 +281,12 @@ void rvm_truncate_log(rvm_t rvm)
 	char * rvm_dir = strdup(rvmP->directory);
 	char log_file[256], seg[256], seg_status[256], seg_name[32];
 
+	long pos;
 	int len = strlen(rvmP->directory); 
-	int rdsize, seg_fd, tmp;
+	int rdsize, seg_fd, tmp, skip;
 	FILE *log_fp;
 	uint64_t offset, size;
-	char *buf;
+	char *buf, rec_st[8];
 	
 	struct stat st={0};
 
@@ -301,7 +305,23 @@ void rvm_truncate_log(rvm_t rvm)
 		return;
 	}
 
+	skip = 0;
 	while(1) {
+		/* check status for a transaction */
+		pos = ftell(log_fp);
+		fscanf(log_fp, "%s", rec_st);
+		if (strcmp(rec_st, "tbg") == 0) {
+			skip = 1;
+			fprintf(stderr, "found a break transaction record\n");
+			continue;
+		} else if (strcmp(rec_st, "tfs") == 0) { //found new successful transaction
+			skip = 0;
+			continue;
+		}
+
+		if (skip) continue; //skip unsuccessful records
+
+		fseek(log_fp, pos, SEEK_SET);
 		/* get log name, update offset and update size */
 		rdsize = fscanf(log_fp, "%s %lu %lu\n", seg_name, &offset, &size);
 		
@@ -343,6 +363,7 @@ void rvm_commit_trans(trans_t tid)
 	char log_file[256], seg[256];
 
 	int i, j, trans_num, len, fd;
+	long pos;
 	struct mapping *mapP;
 	struct seg *segP;
 	struct update *updateP;
@@ -358,8 +379,11 @@ void rvm_commit_trans(trans_t tid)
 		sprintf(log_file, "%s/%s", rvmP->directory, rvmP->log_file);
 	}
 
-	log_fp = fopen(log_file, "a");
-
+	log_fp = fopen(log_file, "r+");
+	fseek(log_fp, 0, SEEK_END);
+	pos = ftell(log_fp);
+	fprintf(log_fp, "tbg\n");
+	
 	for (i = 0; i < trans_num; i++) {
 		mapP = (struct mapping *)map[i];
 		segP = (struct seg *)mapP->segid;
@@ -390,6 +414,10 @@ void rvm_commit_trans(trans_t tid)
 #endif
 	}
 
+	i = ftell(log_fp);
+	fseek(log_fp, pos, SEEK_SET);
+	i = ftell(log_fp);
+	fprintf(log_fp, "tfs\n");
 	fclose(log_fp);
 	rvm_truncate_log(transP->rvm);
 }
